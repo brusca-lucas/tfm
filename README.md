@@ -21,6 +21,7 @@ Evaluate models with both classification metrics and profitability metrics.
 Prepare the system for possible production deployment.
 
 ## Project Structure
+```
 ├── notebooks/               # Exploratory analysis and training notebooks
 │   ├── 01_eda.ipynb
 │   └── 02_train_sandbox.ipynb
@@ -34,29 +35,29 @@ Prepare the system for possible production deployment.
 ├── poetry.lock              # Poetry lockfile
 ├── pyproject.toml           # Project dependencies & config
 └── README.md                # Documentation
-
+```
 ## Setup
 
 This project uses Poetry for dependency management and pyenv for Python version control.
-
+```
 Clone the repository:
 
 git clone https://github.com/your-username/forex-deep-learning.git
 cd forex-deep-learning
-
+```
 
 Set the Python version (via pyenv):
-
+```
 pyenv install 3.x.x
 pyenv local 3.x.x
-
+```
 
 Install dependencies with Poetry:
-
+```
 poetry install
-
+```
 
 Activate the environment:
-
+```
 poetry shell
-
+```
