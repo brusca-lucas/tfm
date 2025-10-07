@@ -1,31 +1,38 @@
-import pandas as pd
 from io import StringIO
 import requests
 from dotenv import load_dotenv
 import os
+
+import pandas as pd
 from ecbdata import ecbdata
 
 load_dotenv()
 
 
-def target_building_runups(data, p, v):
+def target_building_ups(data: pd.DataFrame,
+                        interval: int,
+                        change: float
+                        ) -> pd.DataFrame:
     data["Target"] = 0
     index = len(data["Close"])
-    for i in range(index - p):
+    for i in range(index - interval):
         var = (
-            (data["Close"].iloc[i + p] - data["Close"].iloc[i]) / data["Close"].iloc[i]
+            (data["Close"].iloc[i + interval] - data["Close"].iloc[i])
+            / data["Close"].iloc[i]
         ) * 100
-        if var >= v:
+        if var >= change:
             data["Target"].iloc[i] = 1
     return data
 
 
-def add_BOP(data: pd.DataFrame):
+def add_BOP(data: pd.DataFrame) -> pd.DataFrame:
     data["Time"] = pd.to_datetime(data["Time"])
 
     BOP_URL = os.getenv("BOP_URL")
     response = requests.get(BOP_URL)
-    bop_data = pd.read_csv(StringIO(response.text))[["TIME_PERIOD", "OBS_VALUE"]]
+    bop_data = pd.read_csv(
+        StringIO(response.text)
+        )[["TIME_PERIOD", "OBS_VALUE"]]
 
     bop_data["Year"] = bop_data["TIME_PERIOD"].str[:4].astype(int)
     bop_data["Quarter"] = bop_data["TIME_PERIOD"].str[-2:]
@@ -62,11 +69,15 @@ def add_BOP(data: pd.DataFrame):
 def add_interest_rates(data: pd.DataFrame):
     fed = os.getenv("FED_URL")
     fed_data = (
-        pd.DataFrame(requests.get(fed).json()["observations"])[["date", "value"]]
+        pd.DataFrame(
+            requests.get(fed).json()["observations"]
+            )[["date", "value"]]
         .sort_values("date")
         .rename(columns={"value": "fed_rate"})
     )
-    data["Time"] = pd.to_datetime(data["Time"]).dt.strftime("%Y%m%d").astype(int)
+    data["Time"] = pd.to_datetime(
+        data["Time"]
+        ).dt.strftime("%Y%m%d").astype(int)
     fed_data["date"] = (
         pd.to_datetime(fed_data["date"]).dt.strftime("%Y%m%d").astype(int)
     )
@@ -86,7 +97,9 @@ def add_interest_rates(data: pd.DataFrame):
     )
 
     ecb_data["TIME_PERIOD"] = (
-        pd.to_datetime(ecb_data["TIME_PERIOD"]).dt.strftime("%Y%m%d").astype(int)
+        pd.to_datetime(
+            ecb_data["TIME_PERIOD"]
+            ).dt.strftime("%Y%m%d").astype(int)
     )
 
     data = pd.merge_asof(
@@ -98,6 +111,52 @@ def add_interest_rates(data: pd.DataFrame):
     )
     data.drop("TIME_PERIOD", axis=1, inplace=True)
     return data
+
+
+def add_technicals(data: pd.DataFrame):
+
+    data["MAverage25"] = data["Close"].rolling(25).mean()
+
+    exp1 = data["Close"].ewm(span=12, adjust=False).mean()
+    exp2 = data["Close"].ewm(span=26, adjust=False).mean()
+    macd = exp1 - exp2
+    data["MACD"] = macd
+
+    n_steps = 10
+
+    def dif(x):
+        return (x.iloc[-1] - x.iloc[0]) / x.iloc[0]
+
+    data["ROC"] = data["Close"].rolling(n_steps).apply(dif)
+
+    n_steps = 10
+
+    def dif(x):
+        return x.iloc[-1] - x.iloc[0]
+
+    data["Momentum"] = data["Close"].rolling(n_steps).apply(dif)
+
+    delta = data["Close"].diff()
+    up, down = delta.copy(), delta.copy()
+    up[up < 0] = 0
+    down[down > 0] = 0
+    period = 14
+    _gain = up.ewm(alpha=1.0 / period, adjust=True).mean()
+    _loss = down.abs().ewm(alpha=1.0 / period, adjust=True).mean()
+    RS = _gain / _loss
+    data["RSI"] = 100 - (100 / (1 + RS))
+
+    typical_price = (data["Close"] + data["Low"] + data["High"]) / 3
+    std = typical_price.rolling(20).std(ddof=0)
+    ma_tp = typical_price.rolling(20).mean()
+    data["BOLU"] = ma_tp + 2 * std
+    data["BOLD"] = ma_tp - 2 * std
+
+    tp_rolling = typical_price.rolling(20)
+    mad = tp_rolling.apply(lambda s: abs(s - s.mean()).mean(), raw=True)
+    data["CCI"] = (typical_price - tp_rolling.mean()) / (0.015 * mad)
+
+    return data.dropna(axis=0).reset_index(drop=True)
 
 
 def add_macro(data: pd.DataFrame):
