@@ -1,11 +1,20 @@
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.metrics import AUC
-import tensorflow as tf
-import pandas as pd
+from datetime import datetime
+import yaml
+import joblib
+
 import numpy as np
+import pandas as pd
+import tensorflow as tf
+from tensorflow.keras.metrics import AUC
+from tensorflow.keras.models import Sequential
 from sklearn.preprocessing import StandardScaler
-from src.evaluation_and_metrics import print_pr_roc, equity_curve
+
 from src.data_building import add_macro, add_technicals, target_building_ups
+from src.evaluation_and_metrics import print_pr_roc, equity_curve
+from src.utils.general_utils import find_latest_model
+
+with open('config.yaml', 'r') as file:
+    config = yaml.safe_load(file)
 
 
 class KerasModel:
@@ -18,7 +27,11 @@ class KerasModel:
         change: float,
         features: list,
     ):
-        self.model = Sequential(layers)
+        if layers == 'load':
+            model_path = find_latest_model('keras')
+            self.model = tf.keras.models.load_model(model_path)
+        else:
+            self.model = Sequential(layers)
         self.data = data
         self.features = features
         self.interval = interval
@@ -90,6 +103,12 @@ class KerasModel:
         else:
             print_pr_roc(self.y_test, self.probas_test, plot=plot)
 
+    def save_model(self):
+        base_path = config.get('MODELSPATH') + 'keras/'
+        timestamp = datetime.now().strftime('%Y%m%d')
+        model_path = f"{base_path}model_{timestamp}.h5"
+        self.model.save(model_path)
+
 
 class TreeBasedModel():
     def __init__(
@@ -100,7 +119,11 @@ class TreeBasedModel():
         change: float,
         features: list
     ):
-        self.model = model
+        if model == 'load':
+            model_path = find_latest_model('tree_based/')
+            self.model = joblib.load(model_path)
+        else:
+            self.model = model
         self.data = data
         self.features = features
         self.change = change
@@ -151,3 +174,9 @@ class TreeBasedModel():
         else:
             metric = print_pr_roc(self.y_test, self.probas_test, plot)
         return metric
+
+    def save_model(self):
+        base_path = config.get('MODELSPATH') + 'tree_based'
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        model_path = f"{base_path}model_{timestamp}.pkl"
+        joblib.dump(self.model, model_path)
