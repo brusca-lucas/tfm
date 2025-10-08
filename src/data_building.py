@@ -9,10 +9,10 @@ from ecbdata import ecbdata
 load_dotenv()
 
 
-def target_building_ups(data: pd.DataFrame,
-                        interval: int,
-                        change: float
-                        ) -> pd.DataFrame:
+def target_building_long_short(data: pd.DataFrame,
+                               interval: int,
+                               change: float
+                               ) -> pd.DataFrame:
     data["Target"] = 0
     index = len(data["Close"])
     for i in range(index - interval):
@@ -22,6 +22,8 @@ def target_building_ups(data: pd.DataFrame,
         ) * 100
         if var >= change:
             data["Target"].iloc[i] = 1
+        elif var <= (-change):
+            data["Target"].iloc[i] = -1
     return data
 
 
