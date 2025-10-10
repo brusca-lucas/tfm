@@ -1,6 +1,7 @@
 import os
 
 import yaml
+import numpy as np
 
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
@@ -22,3 +23,12 @@ def find_latest_model(model_type: str) -> str:
         key=lambda f: os.path.getmtime(os.path.join(directory, f))
         )
     return os.path.join(directory, latest_model)
+
+
+def sequences_generation(data, len_sequence):
+    X, y = [], []
+
+    for i in range(len(data) - len_sequence):
+        X.append(data[i: i + len_sequence])
+        y.append(data[i + len_sequence, -1])
+    return np.array(X), np.array(y)

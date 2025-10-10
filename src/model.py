@@ -5,13 +5,15 @@ import joblib
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from tensorflow.keras.metrics import AUC
 from tensorflow.keras.models import Sequential
+from tensorflow.keras.optimizers import Adam
 from sklearn.preprocessing import StandardScaler
 
-from src.data_building import add_macro, add_technicals, target_building_ups
+from src.data_building import (add_macro,
+                               add_technicals,
+                               target_building_long_short)
 from src.evaluation_and_metrics import print_pr_roc, equity_curve
-from src.utils.general_utils import find_latest_model
+from src.utils.general_utils import find_latest_model, sequences_generation
 
 with open('config.yaml', 'r') as file:
     config = yaml.safe_load(file)
@@ -42,66 +44,67 @@ class KerasModel:
         self.data = add_technicals(self.data)
 
     def add_target(self):
-        self.data = target_building_ups(self.data, self.interval, self.change)
+        self.data = target_building_long_short(self.data,
+                                               self.interval,
+                                               self.change)
+
+    def split(self, split_size: float):
+        self.train_size = int(split_size * len(self.data['Target']))
+        self.data_train = self.data[:self.train_size].reset_index()
+        self.data_test = self.data[self.train_size:].reset_index()
 
     def preprocess(self, len_sequence: int):
         self.len_sequence = len_sequence
         scaler = StandardScaler()
-        data_scaled = scaler.fit_transform(self.data[self.features])
-        X, y = [], []
+        self.train_scaled = scaler.fit_transform(
+            self.data_train[self.features]
+            )
+        self.train_scaled = np.column_stack(
+            (self.train_scaled, self.data_train['Target'].values)
+            )
+        self.test_scaled = scaler.transform(
+            self.data_test[self.features]
+            )
+        self.test_scaled = np.column_stack(
+            (self.test_scaled, self.data_test['Target'].values)
+            )
+        self.X_train, self.y_train = sequences_generation(
+            self.train_scaled,
+            self.len_sequence
+            )
+        self.X_test, self.y_test = sequences_generation(
+            self.test_scaled,
+            self.len_sequence
+            )
 
-        for i in range(len(data_scaled) - len_sequence - 3):
-            X.append(data_scaled[i: i + len_sequence])
-            y.append(self.data["Target"].iloc[i + len_sequence])
-        self.X = np.array(X)
-        self.y = np.array(y)
-
-    def split(self, split_size: float):
-        train_size = int(split_size * len(self.X))
-        self.train_size = train_size
-        self.X_train, self.X_test = self.X[:train_size], self.X[train_size:]
-        self.y_train, self.y_test = self.y[:train_size], self.y[train_size:]
-
-    def train(self, epochs: int):
-        def auc_loss(y_true, y_pred):
-            y_true = tf.cast(y_true, tf.float32)
-            pos = tf.boolean_mask(y_pred, y_true == 1)
-            neg = tf.boolean_mask(y_pred, y_true == 0)
-            diff = tf.expand_dims(neg, 1) - tf.expand_dims(pos, 0)
-            return tf.reduce_mean(tf.nn.sigmoid(diff))
-
+    def train(self, epochs: int, learning_rate: float):
         self.model.compile(
-            loss=auc_loss,
-            optimizer="adam",
-            metrics=[AUC(name="roc_auc", curve="ROC")]
+            loss='mse',
+            optimizer=Adam(learning_rate=learning_rate)
             )
         self.model.fit(self.X_train, self.y_train, epochs=epochs)
 
     def infere(self):
-        self.probas_train = self.model.predict(self.X_train)
-        self.probas_test = self.model.predict(self.X_test)
+        self.pred_train = self.model.predict(self.X_train)
+        self.pred_test = self.model.predict(self.X_test)
 
     def equity_curve(self, threshold: float, plot, train=False):
         if train:
-            equity_curve(
-                self.probas_train,
-                self.data["Close"][self.train_size + self.len_sequence:],
+            return equity_curve(
+                self.pred_train,
+                self.data_train["Close"],
                 threshold,
+                self.interval,
                 plot=plot
             )
         else:
-            equity_curve(
-                self.probas_test,
-                self.data["Close"][self.train_size + self.len_sequence:],
+            return equity_curve(
+                self.pred_test,
+                self.data_test["Close"],
                 threshold,
+                self.interval,
                 plot=plot
             )
-
-    def pr_roc(self, plot, train=False):
-        if train:
-            print_pr_roc(self.y_train, self.probas_train, plot=plot)
-        else:
-            print_pr_roc(self.y_test, self.probas_test, plot=plot)
 
     def save_model(self):
         base_path = config.get('MODELSPATH') + 'keras/'
@@ -134,7 +137,9 @@ class TreeBasedModel():
         self.data = add_technicals(self.data)
 
     def add_target(self):
-        self.data = target_building_ups(self.data, self.interval, self.change)
+        self.data = target_building_long_short(self.data,
+                                               self.interval,
+                                               self.change)
 
     def split(self, split_size: float):
         train_size = int(split_size * len(self.data["Target"]))
